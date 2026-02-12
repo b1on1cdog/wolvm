@@ -1,7 +1,7 @@
 # Install
-mkdir -p /mnt/user/appdata/misc
-curl -o /mnt/user/appdata/misc/wolvm https://github.com/b1on1cdog/wolvm/releases/download/0.0.1/wolvm
-chmod +x /mnt/user/appdata/misc/wolvm
+mkdir -p /mnt/user/appdata/misc<br>
+curl -o /mnt/user/appdata/misc/wolvm https://github.com/b1on1cdog/wolvm/releases/download/0.0.1/wolvm<br>
+chmod +x /mnt/user/appdata/misc/wolvm<br>
 
 # User Script
 #!/bin/bash
