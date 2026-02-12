@@ -6,8 +6,8 @@ chmod +x /mnt/user/appdata/misc/wolvm
 # User Script
 #!/bin/bash
 
-VM_NAME="Windows"
-VM_MAC="VM_MAC_ADDRESS"
-IFACE="br0"
+VM_NAME="Windows"<br>
+VM_MAC="VM_MAC_ADDRESS"<br>
+IFACE="br0"<br>
 
 /mnt/user/appdata/misc/wolvm -iface $IFACE -mac $VM_MAC -vm $VM_NAME
