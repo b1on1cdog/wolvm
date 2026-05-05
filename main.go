@@ -9,8 +9,10 @@ import (
 	"flag"
 	"log"
 	"net"
+	"net/http"
 	"os/exec"
 	"strings"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -19,10 +21,44 @@ func htons(i uint16) uint16 {
 	return (i<<8)&0xff00 | i>>8
 }
 
+func is_vm_running(vmName string) bool {
+	out, _ := exec.Command("virsh", "domstate", vmName).Output()
+	if bytes.Contains(out, []byte("running")) {
+		return true
+	}
+	return false
+}
+
+func is_vm_paused(vmName string) bool {
+	out, _ := exec.Command("virsh", "domstate", vmName).Output()
+	if bytes.Contains(out, []byte("paused")) {
+		return true
+	}
+	return false
+}
+
+func vmStateStalker(vmName string, woffUrl string) {
+	// Wait for VM to shutdown to call a webhook
+	if woffUrl == "" {
+		return
+	}
+	for {
+		time.Sleep(8 * time.Second)
+		if !is_vm_paused(vmName) && !is_vm_running(vmName) {
+			http.Get(woffUrl)
+			return
+		}
+	}
+}
+
 func main() {
 	ifaceName := flag.String("iface", "br0", "Interface to listen on")
 	vmName := flag.String("vm", "", "VM name")
 	macStr := flag.String("mac", "", "MAC to wake (aa:bb:cc:dd:ee:ff)")
+
+	wonUrl := flag.String("won", "", "WebHook URL for VM start")
+	woffUrl := flag.String("woff", "", "WebHook URL for VM shutdown")
+
 	flag.Parse()
 
 	if *vmName == "" || *macStr == "" {
@@ -74,10 +110,19 @@ func main() {
 		}
 
 		if bytes.Contains(buf[:n], pattern) {
-			out, _ := exec.Command("virsh", "domstate", *vmName).Output()
-			if !bytes.Contains(out, []byte("running")) {
+			if !is_vm_running(*vmName) {
 				log.Printf("WoL received — starting VM %s", *vmName)
-				exec.Command("virsh", "start", *vmName).Run()
+				vmCmd := "start"
+				if is_vm_paused(*vmName) {
+					vmCmd = "resume"
+				}
+				go func() {
+					http.Get(*wonUrl)
+				}()
+				exec.Command("virsh", vmCmd, *vmName).Run()
+				go func() {
+					vmStateStalker(*vmName, *woffUrl)
+				}()
 			}
 		}
 	}
