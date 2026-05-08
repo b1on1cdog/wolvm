@@ -1,0 +1,8 @@
+#!/bin/bash
+
+# Replace with your values
+VM_NAME="Windows"
+VM_MAC="00:00:00:00:00:00"
+IFACE="br0"
+
+/mnt/user/appdata/misc/wolvm -iface $IFACE -mac $VM_MAC -vm $VM_NAME

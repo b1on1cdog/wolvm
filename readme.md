@@ -4,10 +4,7 @@ curl -o /mnt/user/appdata/misc/wolvm https://github.com/b1on1cdog/wolvm/releases
 chmod +x /mnt/user/appdata/misc/wolvm<br>
 
 # User Script
-#!/bin/bash
+wolvm is expected to be used with the plugin User Scripts<br/>
 
-VM_NAME="Windows"<br>
-VM_MAC="VM_MAC_ADDRESS"<br>
-IFACE="br0"<br>
-
-/mnt/user/appdata/misc/wolvm -iface $IFACE -mac $VM_MAC -vm $VM_NAME
+[Script without webhooks](files/user_script)<br>
+[Script with webhooks](files/user_script)<br>

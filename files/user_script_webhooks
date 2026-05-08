@@ -1,0 +1,11 @@
+#!/bin/bash
+
+# Replace with your values
+VM_NAME="Windows"
+VM_MAC="00:00:00:00:00:00"
+IFACE="br0"
+# WON url is called when WoL request is received, WOFF when VM is completely shutdown 
+WON=""
+WOFF=""
+
+/mnt/user/appdata/misc/wolvm -iface $IFACE -mac $VM_MAC -vm $VM_NAME -won "$WON" -woff "$WOFF"
