@@ -7,10 +7,12 @@ import (
 	"bytes"
 	"encoding/hex"
 	"flag"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 
@@ -51,22 +53,53 @@ func vmStateStalker(vmName string, woffUrl string) {
 	}
 }
 
-func main() {
-	ifaceName := flag.String("iface", "br0", "Interface to listen on")
-	vmName := flag.String("vm", "", "VM name")
-	macStr := flag.String("mac", "", "MAC to wake (aa:bb:cc:dd:ee:ff)")
+func parseVirshList(virshOutput string) [][]string {
+	list := strings.Split(virshOutput, "\n")[2:]
+	out_list := [][]string{}
+	for _, line := range list {
+		if len(line) > 12 {
+			line = strings.TrimSpace(line)
+			whitespaces := regexp.MustCompile(`\s\s+`)
+			line = whitespaces.ReplaceAllString(line, "|")
+			out_list = append(out_list, strings.Split(line, "|"))
+		}
+	}
+	return out_list
+}
 
-	wonUrl := flag.String("won", "", "WebHook URL for VM start")
-	woffUrl := flag.String("woff", "", "WebHook URL for VM shutdown")
-
-	flag.Parse()
-
-	if *vmName == "" || *macStr == "" {
-		log.Fatal("vm and mac are required")
+func readVMInterface(vmName string, keyName string) string {
+	output, _ := exec.Command("virsh", "domiflist", vmName).Output()
+	virshOutput := string(output[:])
+	virshList := parseVirshList(virshOutput)
+	validKeys := map[string]int{
+		"Interface": 0,
+		"Type":      1,
+		"Source":    2,
+		"Model":     3,
+		"MAC":       4,
 	}
 
+	for _, virshEl := range virshList {
+		return virshEl[validKeys[keyName]]
+	}
+	return ""
+}
+
+func listVMs() []string {
+	output, _ := exec.Command("virsh", "list", "--all").Output()
+	virshOutput := string(output[:])
+	virshList := parseVirshList(virshOutput)
+	vms := []string{}
+	for _, virshEl := range virshList {
+		vms = append(vms, virshEl[1])
+		//fmt.Printf("vm: %v\n", virshEl[1])
+	}
+	return vms
+}
+
+func startWolForVM(vmName string, macStr string, ifaceName string, wonUrl string, woffUrl string) {
 	// Build WoL magic packet pattern
-	macClean := strings.ReplaceAll(strings.ToLower(*macStr), ":", "")
+	macClean := strings.ReplaceAll(strings.ToLower(macStr), ":", "")
 	macBytes, err := hex.DecodeString(macClean)
 	if err != nil {
 		log.Fatal(err)
@@ -77,7 +110,7 @@ func main() {
 		pattern = append(pattern, macBytes...)
 	}
 
-	iface, err := net.InterfaceByName(*ifaceName)
+	iface, err := net.InterfaceByName(ifaceName)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -99,7 +132,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	log.Printf("Listening for WoL on %s for VM %s (%s)", *ifaceName, *vmName, *macStr)
+	log.Printf("Listening for WoL on %s for VM %s (%s)", ifaceName, vmName, macStr)
 
 	buf := make([]byte, 2048)
 
@@ -110,20 +143,76 @@ func main() {
 		}
 
 		if bytes.Contains(buf[:n], pattern) {
-			if !is_vm_running(*vmName) {
-				log.Printf("WoL received — starting VM %s", *vmName)
+			if !is_vm_running(vmName) {
+				log.Printf("WoL received — starting VM %s", vmName)
 				vmCmd := "start"
-				if is_vm_paused(*vmName) {
+				if is_vm_paused(vmName) {
 					vmCmd = "resume"
 				}
 				go func() {
-					http.Get(*wonUrl)
+					http.Get(wonUrl)
 				}()
-				exec.Command("virsh", vmCmd, *vmName).Run()
+				exec.Command("virsh", vmCmd, vmName).Run()
 				go func() {
-					vmStateStalker(*vmName, *woffUrl)
+					vmStateStalker(vmName, woffUrl)
 				}()
 			}
 		}
 	}
+}
+
+func main() {
+	vmName := flag.String("vm", "", "VM name, if unspecified all VMs that match the filter will be used")
+	ifaceName := flag.String("iface", "", "Interface to listen on, work as filter when -vm is unspecified")
+	macStr := flag.String("mac", "", "MAC to wake (aa:bb:cc:dd:ee:ff), work as filter when -vm is unspecified")
+
+	wonUrl := flag.String("won", "", "WebHook URL for VM start")
+	woffUrl := flag.String("woff", "", "WebHook URL for VM shutdown")
+
+	selectFirst := flag.Bool("first", false, "Select first VM only (when VM is unspecified)")
+	flag.Parse()
+
+	if *vmName == "" {
+		if *macStr == "" && *ifaceName == "" {
+			fmt.Printf("vm name and network fields not specified, starting wolvm for ALL virsh domains....\n")
+		} else {
+			fmt.Printf("vm name not specified, searching for vm with matching network fields....\n")
+		}
+		vms := listVMs()
+		for _, domain := range vms {
+			networkSource := readVMInterface(domain, "Source")
+			if *ifaceName != "" && *ifaceName != networkSource {
+				fmt.Printf("Skipping %v because interface mismatch\n", domain)
+				continue
+			}
+			macAddr := readVMInterface(domain, "MAC")
+			if *macStr != "" && *macStr != macAddr {
+				fmt.Printf("Skipping %v because mac mismatch\n", domain)
+				continue
+			}
+			if len(vms) == 1 || *selectFirst {
+				*vmName = domain
+				*macStr = macAddr
+				*ifaceName = networkSource
+				break
+			}
+			go func() {
+				startWolForVM(domain, macAddr, networkSource, *wonUrl, *woffUrl)
+			}()
+		}
+		if *vmName == "" {
+			select {}
+		}
+	}
+
+	if *macStr == "" {
+		*macStr = readVMInterface(*vmName, "MAC")
+	}
+
+	if *ifaceName == "" {
+		*ifaceName = readVMInterface(*vmName, "Source")
+	}
+
+	startWolForVM(*vmName, *macStr, *ifaceName, *wonUrl, *woffUrl)
+
 }
